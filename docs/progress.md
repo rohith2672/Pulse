@@ -62,7 +62,40 @@
 - Spark job consuming and aggregating — results appear in Postgres after ~11 minutes (watermark delay)
 
 ### Pending
-- Verify data in Postgres: `SELECT * FROM category_metrics ORDER BY window_start DESC LIMIT 20;`
+- ~~Verify data in Postgres~~ ✓
 - Deployment: AWS EC2 setup (`deployment/` still empty)
+- Optional: Kubernetes manifests
+- Optional: dashboard / visualization layer on top of the metrics tables
+
+---
+
+## Session: 2026-03-11
+
+### Completed
+- Full end-to-end pipeline smoke test — verified Kafka → Spark → Postgres is working
+- Ran `docker compose down -v` + `docker compose up -d --build` for a clean restart
+- Confirmed producer streams ~5 events/sec via Docker (MSYS_NO_PATHCONV=1 workaround for Git Bash path mangling)
+- Confirmed Kafka `orders` topic accumulating messages (794+ offsets verified via `kafka-run-class GetOffsetShell`)
+- Confirmed Spark micro-batches processing every 30 seconds
+- Queried Postgres after watermark passed — data confirmed in both tables:
+  - `category_metrics`: all 7 categories with correct revenue, order count, avg order value, quantity per 1-min window
+  - `city_metrics`: per-city revenue and order count per 1-min window
+
+### Issues Hit & Fixes
+- Spark-job crashed on first start with `UnknownTopicOrPartitionException`
+  - Cause: Spark started before Kafka finished creating the `orders` topic
+  - Fixed: `docker compose restart spark-job` after topic was confirmed present
+  - Long-term fix: pre-create topic in docker-compose or add a retry loop in entrypoint
+
+- Git Bash path mangling with `-w /app` in `docker run`
+  - Cause: Git Bash converts `/app` → `C:/Program Files/Git/app`
+  - Fixed: use `MSYS_NO_PATHCONV=1` env var + `--workdir //app` (double slash)
+
+### Current State
+- Pipeline fully verified end-to-end
+- All services healthy, data flowing into Postgres
+
+### Pending
+- AWS EC2 deployment (`deployment/` still empty)
 - Optional: Kubernetes manifests
 - Optional: dashboard / visualization layer on top of the metrics tables
