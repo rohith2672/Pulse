@@ -47,7 +47,38 @@ services:
       - "5432:5432"
     volumes:
       - pg_data:/var/lib/postgresql/data
+      - ./database:/docker-entrypoint-initdb.d   # runs schema.sql on first start
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pulse"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  spark-job:
+    build: ./spark-streaming
+    container_name: pulse-spark-job
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+    restart: on-failure
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      KAFKA_TOPIC: orders
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: pulse
+      POSTGRES_USER: pulse
+      POSTGRES_PASSWORD: pulse
+      CHECKPOINT_DIR: /opt/spark-checkpoints
+      WATERMARK_DELAY: "10 minutes"
+      WINDOW_DURATION: "1 minute"
+      TRIGGER_INTERVAL: "30 seconds"
+    volumes:
+      - spark_checkpoints:/opt/spark-checkpoints
 
 volumes:
   kafka_data:
   pg_data:
+  spark_checkpoints:
