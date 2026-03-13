@@ -76,6 +76,10 @@ if [[ "${SG_ID}" == "None" || -z "${SG_ID}" ]]; then
   aws_cmd ec2 authorize-security-group-ingress \
     --group-id "${SG_ID}" --protocol tcp --port 5432 --cidr 0.0.0.0/0
 
+  # Grafana UI
+  aws_cmd ec2 authorize-security-group-ingress \
+    --group-id "${SG_ID}" --protocol tcp --port 3000 --cidr 0.0.0.0/0
+
   echo "[deploy] Security group created: ${SG_ID}"
 else
   echo "[deploy] Security group '${SG_NAME}' already exists: ${SG_ID}"

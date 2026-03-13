@@ -45,8 +45,15 @@ sudo chown -R ec2-user:ec2-user "${APP_DIR}"
 if [[ ! -f "${ENV_FILE}" ]]; then
   echo "[setup] Creating .env from env.example — EDIT IT before starting the stack."
   cp "${APP_DIR}/deployment/env.example" "${ENV_FILE}"
-  # Inject the instance's own public IP
-  PUBLIC_IP=$(curl -sf http://169.254.169.254/latest/meta-data/public-ipv4 || echo "")
+  # Inject the instance's own public IP (IMDSv2-first, falls back to IMDSv1)
+  TOKEN=$(curl -sf -X PUT "http://169.254.169.254/latest/api/token" \
+    -H "X-aws-ec2-metadata-token-ttl-seconds: 21600" || echo "")
+  if [[ -n "${TOKEN}" ]]; then
+    PUBLIC_IP=$(curl -sf -H "X-aws-ec2-metadata-token: ${TOKEN}" \
+      http://169.254.169.254/latest/meta-data/public-ipv4 || echo "")
+  else
+    PUBLIC_IP=$(curl -sf http://169.254.169.254/latest/meta-data/public-ipv4 || echo "")
+  fi
   if [[ -n "${PUBLIC_IP}" ]]; then
     sed -i "s|<your-ec2-public-ip>|${PUBLIC_IP}|g" "${ENV_FILE}"
     echo "[setup] EC2_PUBLIC_IP set to ${PUBLIC_IP}"

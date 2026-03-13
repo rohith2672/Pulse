@@ -149,3 +149,25 @@ The Pulse dashboard auto-loads under Dashboards → Pulse.
 
 ### Pending
 - Optional: Kubernetes manifests
+
+---
+
+## Session: 2026-03-13
+
+### Completed
+- Fixed two bugs in deployment scripts that would cause a fresh EC2 deployment to fail silently.
+
+**Bug 1 — Grafana port 3000 missing from security group (`deployment/deploy.sh`)**
+- `pulse-sg` only opened ports 22, 9092, 5432. Grafana maps `3000:3000` but the port was unreachable from browsers.
+- Fix: added `aws ec2 authorize-security-group-ingress --port 3000` rule inside the security group creation block.
+
+**Bug 2 — IMDSv1 metadata call fails on AL2023 AMIs (`deployment/setup.sh`)**
+- `setup.sh` fetched the EC2 public IP via IMDSv1 (`curl http://169.254.169.254/...`). Post-2024 Amazon Linux 2023 AMIs default to requiring IMDSv2 (token-based). The call silently returned empty, leaving `EC2_PUBLIC_IP=<your-ec2-public-ip>` as a literal placeholder in `.env`, which broke Kafka's advertised listener for external connections.
+- Fix: replaced single `curl` with an IMDSv2-first pattern — fetch a session token first, use it for the metadata call, fall back to IMDSv1 only if the token request fails.
+
+### Current State
+- Deployment scripts ready for a clean EC2 run.
+- All 6 services (zookeeper, kafka, postgres, spark-job, producer, grafana) should start correctly.
+
+### Pending
+- Optional: Kubernetes manifests
