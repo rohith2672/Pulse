@@ -1,0 +1,56 @@
+# deployment/docker-compose.prod.yml
+# Production overrides for docker-compose.yml.
+# Usage (from repo root):
+#   docker compose -f docker-compose.yml -f deployment/docker-compose.prod.yml up -d --build
+#
+# Requires deployment/.env to be present with all variables filled in.
+
+version: "3.8"
+
+services:
+
+  # ── Zookeeper ──────────────────────────────────────────────────────────────
+  zookeeper:
+    restart: unless-stopped
+
+  # ── Kafka ──────────────────────────────────────────────────────────────────
+  kafka:
+    restart: unless-stopped
+    environment:
+      # Override: advertise the EC2 public IP so external clients can connect.
+      # Internal service-to-service traffic still uses the PLAINTEXT listener
+      # (kafka:29092) which stays on the Docker bridge network.
+      KAFKA_ADVERTISED_LISTENERS: "PLAINTEXT://kafka:29092,PLAINTEXT_HOST://${EC2_PUBLIC_IP}:9092"
+
+  # ── PostgreSQL ─────────────────────────────────────────────────────────────
+  postgres:
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+
+  # ── Spark streaming job ────────────────────────────────────────────────────
+  spark-job:
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+
+  # ── Kafka producer (new service — not in dev compose) ─────────────────────
+  producer:
+    image: python:3.11-slim
+    container_name: pulse-producer
+    working_dir: /app
+    volumes:
+      - ../producer:/app
+    command: >
+      bash -c "pip install --no-cache-dir -r requirements.txt && python producer.py"
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      KAFKA_TOPIC: ${KAFKA_TOPIC}
+      EVENTS_PER_SECOND: ${EVENTS_PER_SECOND}
+    depends_on:
+      - kafka
+    restart: unless-stopped
