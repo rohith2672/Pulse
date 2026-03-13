@@ -1,0 +1,364 @@
+{
+  "uid": "pulse-main",
+  "title": "Pulse — Real-Time Order Pipeline",
+  "description": "Live metrics from the Kafka → Spark → Postgres streaming pipeline",
+  "tags": ["pulse", "kafka", "spark", "streaming"],
+  "schemaVersion": 38,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-1h", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "panels": [
+
+    {
+      "id": 1,
+      "title": "Total Revenue (all time)",
+      "type": "stat",
+      "gridPos": { "x": 0, "y": 0, "w": 6, "h": 4 },
+      "datasource": { "uid": "pulse_pg" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "decimals": 2,
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null }
+            ]
+          }
+        }
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "orientation": "auto", "textMode": "auto", "colorMode": "background" },
+      "targets": [
+        {
+          "datasource": { "uid": "pulse_pg" },
+          "rawSql": "SELECT NOW() AS time, SUM(total_revenue) AS value FROM category_metrics",
+          "format": "table",
+          "refId": "A"
+        }
+      ]
+    },
+
+    {
+      "id": 2,
+      "title": "Total Orders (all time)",
+      "type": "stat",
+      "gridPos": { "x": 6, "y": 0, "w": 6, "h": 4 },
+      "datasource": { "uid": "pulse_pg" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "blue", "value": null }]
+          }
+        }
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background" },
+      "targets": [
+        {
+          "datasource": { "uid": "pulse_pg" },
+          "rawSql": "SELECT NOW() AS time, SUM(order_count) AS value FROM category_metrics",
+          "format": "table",
+          "refId": "A"
+        }
+      ]
+    },
+
+    {
+      "id": 3,
+      "title": "Avg Order Value (all time)",
+      "type": "stat",
+      "gridPos": { "x": 12, "y": 0, "w": 6, "h": 4 },
+      "datasource": { "uid": "pulse_pg" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "decimals": 2,
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "orange", "value": null }]
+          }
+        }
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background" },
+      "targets": [
+        {
+          "datasource": { "uid": "pulse_pg" },
+          "rawSql": "SELECT NOW() AS time, ROUND(SUM(total_revenue) / NULLIF(SUM(order_count), 0), 2) AS value FROM category_metrics",
+          "format": "table",
+          "refId": "A"
+        }
+      ]
+    },
+
+    {
+      "id": 4,
+      "title": "Active Categories",
+      "type": "stat",
+      "gridPos": { "x": 18, "y": 0, "w": 6, "h": 4 },
+      "datasource": { "uid": "pulse_pg" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "purple", "value": null }]
+          }
+        }
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background" },
+      "targets": [
+        {
+          "datasource": { "uid": "pulse_pg" },
+          "rawSql": "SELECT NOW() AS time, COUNT(DISTINCT category) AS value FROM category_metrics",
+          "format": "table",
+          "refId": "A"
+        }
+      ]
+    },
+
+    {
+      "id": 5,
+      "title": "Revenue per Minute (by Category)",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 4, "w": 24, "h": 8 },
+      "datasource": { "uid": "pulse_pg" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "decimals": 2,
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "pointSize": 4,
+            "showPoints": "auto",
+            "spanNulls": false
+          }
+        }
+      },
+      "options": {
+        "tooltip": { "mode": "multi", "sort": "desc" },
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["sum", "mean", "lastNotNull"] }
+      },
+      "targets": [
+        {
+          "datasource": { "uid": "pulse_pg" },
+          "rawSql": "SELECT window_start AS time, category, total_revenue AS value FROM category_metrics WHERE window_start BETWEEN $__timeFrom() AND $__timeTo() ORDER BY window_start",
+          "format": "table",
+          "refId": "A"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "partitionByValues",
+          "options": { "fields": ["category"] }
+        }
+      ]
+    },
+
+    {
+      "id": 6,
+      "title": "Orders per Minute (by Category)",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 12, "w": 12, "h": 8 },
+      "datasource": { "uid": "pulse_pg" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "auto",
+            "spanNulls": false
+          }
+        }
+      },
+      "options": {
+        "tooltip": { "mode": "multi", "sort": "desc" },
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["sum", "mean"] }
+      },
+      "targets": [
+        {
+          "datasource": { "uid": "pulse_pg" },
+          "rawSql": "SELECT window_start AS time, category, order_count AS value FROM category_metrics WHERE window_start BETWEEN $__timeFrom() AND $__timeTo() ORDER BY window_start",
+          "format": "table",
+          "refId": "A"
+        }
+      ],
+      "transformations": [
+        { "id": "partitionByValues", "options": { "fields": ["category"] } }
+      ]
+    },
+
+    {
+      "id": 7,
+      "title": "Avg Order Value per Minute (by Category)",
+      "type": "timeseries",
+      "gridPos": { "x": 12, "y": 12, "w": 12, "h": 8 },
+      "datasource": { "uid": "pulse_pg" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "decimals": 2,
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "auto",
+            "spanNulls": false
+          }
+        }
+      },
+      "options": {
+        "tooltip": { "mode": "multi", "sort": "desc" },
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean", "lastNotNull"] }
+      },
+      "targets": [
+        {
+          "datasource": { "uid": "pulse_pg" },
+          "rawSql": "SELECT window_start AS time, category, avg_order_value AS value FROM category_metrics WHERE window_start BETWEEN $__timeFrom() AND $__timeTo() ORDER BY window_start",
+          "format": "table",
+          "refId": "A"
+        }
+      ],
+      "transformations": [
+        { "id": "partitionByValues", "options": { "fields": ["category"] } }
+      ]
+    },
+
+    {
+      "id": 8,
+      "title": "Revenue Share by Category",
+      "type": "piechart",
+      "gridPos": { "x": 0, "y": 20, "w": 12, "h": 8 },
+      "datasource": { "uid": "pulse_pg" },
+      "fieldConfig": {
+        "defaults": { "unit": "currencyUSD", "decimals": 2 }
+      },
+      "options": {
+        "pieType": "donut",
+        "tooltip": { "mode": "single" },
+        "legend": { "displayMode": "table", "placement": "right", "values": ["percent", "value"] }
+      },
+      "targets": [
+        {
+          "datasource": { "uid": "pulse_pg" },
+          "rawSql": "SELECT category, SUM(total_revenue) AS value FROM category_metrics WHERE window_start BETWEEN $__timeFrom() AND $__timeTo() GROUP BY category ORDER BY value DESC",
+          "format": "table",
+          "refId": "A"
+        }
+      ]
+    },
+
+    {
+      "id": 9,
+      "title": "Order Count by Category",
+      "type": "bargauge",
+      "gridPos": { "x": 12, "y": 20, "w": 12, "h": 8 },
+      "datasource": { "uid": "pulse_pg" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "color": { "mode": "palette-classic" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "green", "value": null }]
+          }
+        }
+      },
+      "options": {
+        "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "displayMode": "gradient",
+        "valueMode": "color",
+        "showUnfilled": true
+      },
+      "targets": [
+        {
+          "datasource": { "uid": "pulse_pg" },
+          "rawSql": "SELECT category, SUM(order_count) AS value FROM category_metrics WHERE window_start BETWEEN $__timeFrom() AND $__timeTo() GROUP BY category ORDER BY value DESC",
+          "format": "table",
+          "refId": "A"
+        }
+      ]
+    },
+
+    {
+      "id": 10,
+      "title": "Top 20 Cities by Revenue",
+      "type": "bargauge",
+      "gridPos": { "x": 0, "y": 28, "w": 12, "h": 10 },
+      "datasource": { "uid": "pulse_pg" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "decimals": 2,
+          "color": { "mode": "palette-classic" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "blue", "value": null }]
+          }
+        }
+      },
+      "options": {
+        "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "displayMode": "gradient",
+        "showUnfilled": true
+      },
+      "targets": [
+        {
+          "datasource": { "uid": "pulse_pg" },
+          "rawSql": "SELECT city, SUM(total_revenue) AS value FROM city_metrics WHERE window_start BETWEEN $__timeFrom() AND $__timeTo() GROUP BY city ORDER BY value DESC LIMIT 20",
+          "format": "table",
+          "refId": "A"
+        }
+      ]
+    },
+
+    {
+      "id": 11,
+      "title": "Revenue per Minute (Top 10 Cities)",
+      "type": "timeseries",
+      "gridPos": { "x": 12, "y": 28, "w": 12, "h": 10 },
+      "datasource": { "uid": "pulse_pg" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "decimals": 2,
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 6,
+            "showPoints": "auto",
+            "spanNulls": false
+          }
+        }
+      },
+      "options": {
+        "tooltip": { "mode": "multi", "sort": "desc" },
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["sum", "lastNotNull"] }
+      },
+      "targets": [
+        {
+          "datasource": { "uid": "pulse_pg" },
+          "rawSql": "SELECT cm.window_start AS time, cm.city, cm.total_revenue AS value FROM city_metrics cm INNER JOIN (SELECT city, SUM(total_revenue) AS rev FROM city_metrics GROUP BY city ORDER BY rev DESC LIMIT 10) top ON cm.city = top.city WHERE cm.window_start BETWEEN $__timeFrom() AND $__timeTo() ORDER BY cm.window_start",
+          "format": "table",
+          "refId": "A"
+        }
+      ],
+      "transformations": [
+        { "id": "partitionByValues", "options": { "fields": ["city"] } }
+      ]
+    }
+
+  ]
+}

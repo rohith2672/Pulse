@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cd \"C:\\\\Users\\\\rohit\\\\OneDrive\\\\Desktop\\\\Pulse\" && docker compose down -v 2>&1)",
+      "Bash(cd \"C:\\\\Users\\\\rohit\\\\OneDrive\\\\Desktop\\\\Pulse\" && docker compose up -d --build 2>&1)",
+      "Bash(cd \"C:\\\\Users\\\\rohit\\\\OneDrive\\\\Desktop\\\\Pulse\" && docker stop pulse-producer && docker compose down 2>&1)"
+    ]
+  }
+}

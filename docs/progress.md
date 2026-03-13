@@ -96,6 +96,56 @@
 - All services healthy, data flowing into Postgres
 
 ### Pending
-- AWS EC2 deployment (`deployment/` still empty)
+- ~~AWS EC2 deployment~~ ✓
 - Optional: Kubernetes manifests
 - Optional: dashboard / visualization layer on top of the metrics tables
+
+---
+
+## Session: 2026-03-12
+
+### Completed
+- Built `producer/Dockerfile` — containerises the producer so it runs as a proper service in prod
+- Built `deployment/docker-compose.prod.yml` — production overrides (restart policies, env-var references, log rotation, adds `producer` service)
+- Built `deployment/env.example` — template for prod `.env` (POSTGRES_PASSWORD, EC2_PUBLIC_IP, EVENTS_PER_SECOND)
+- Built `deployment/deploy.sh` — local script using AWS CLI to:
+  - Create EC2 key pair + save `.pem` if not already present
+  - Create `pulse-sg` security group (ports 22, 9092, 5432)
+  - Look up latest Amazon Linux 2023 AMI automatically
+  - Launch `t3.medium` EC2 instance with 30 GB gp3 root volume
+  - Wait for SSH availability, then upload and run `setup.sh`
+- Built `deployment/setup.sh` — runs on the EC2 instance to:
+  - Install Docker + Docker Compose plugin v2.27.1
+  - Clone the repo from `REPO_URL` / `BRANCH`
+  - Create `.env` from `env.example`, auto-inject EC2 public IP via instance metadata
+  - Run `docker compose -f docker-compose.yml -f deployment/docker-compose.prod.yml up -d --build`
+
+### Usage
+```bash
+export REPO_URL=https://github.com/<you>/pulse
+bash deployment/deploy.sh
+```
+Optional overrides: `KEY_NAME`, `KEY_FILE`, `INSTANCE_TYPE` (default `t3.medium`), `REGION` (default `us-east-1`), `BRANCH` (default `main`).
+
+- Added `grafana/` service to `docker-compose.yml` (auto-provisions Postgres datasource + dashboard on startup)
+- Built `grafana/provisioning/datasources/postgres.yml` — zero-config Postgres connection
+- Built `grafana/provisioning/dashboards/provider.yml` — auto-loads dashboards from `grafana/dashboards/`
+- Built `grafana/dashboards/pulse.json` — 11-panel dashboard:
+  - Row 1: 4 stat panels (total revenue, total orders, avg order value, active categories)
+  - Row 2: Revenue per minute by category (time series, full width)
+  - Row 3: Orders per minute + avg order value per minute (by category)
+  - Row 4: Revenue share donut chart + order count bar gauge (by category)
+  - Row 5: Top 20 cities by revenue (bar gauge) + top 10 city revenue over time (time series)
+- Updated `deployment/docker-compose.prod.yml` — adds Grafana prod overrides + `GRAFANA_PASSWORD` env var
+- Updated `deployment/env.example` — added `GRAFANA_PASSWORD`
+
+### Usage
+Start the full stack including Grafana:
+```bash
+docker compose up -d --build
+```
+Open `http://localhost:3000` — login with `admin / admin`.
+The Pulse dashboard auto-loads under Dashboards → Pulse.
+
+### Pending
+- Optional: Kubernetes manifests
