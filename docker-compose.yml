@@ -78,7 +78,31 @@ services:
     volumes:
       - spark_checkpoints:/opt/spark-checkpoints
 
+  grafana:
+    image: grafana/grafana:10.4.2
+    container_name: pulse-grafana
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      # Pass Postgres connection details into the datasource provisioning
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: pulse
+      POSTGRES_USER: pulse
+      POSTGRES_PASSWORD: pulse
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning
+      - ./grafana/dashboards:/var/lib/grafana/dashboards
+
 volumes:
   kafka_data:
   pg_data:
   spark_checkpoints:
+  grafana_data:
