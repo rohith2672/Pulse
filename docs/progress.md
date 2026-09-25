@@ -171,3 +171,24 @@ The Pulse dashboard auto-loads under Dashboards → Pulse.
 
 ### Pending
 - Optional: Kubernetes manifests
+
+---
+
+## Session: 2026-09-25
+
+### Completed
+- Turned the single Kafka → Spark → Postgres hop into a multi-stage pipeline, all inside the existing Spark job (no new services):
+  - **Validation + DLQ** — `spark-streaming/validation.py` (`validate_order`) runs as a UDF after JSON parsing; invalid events go to the new `orders_dlq` table with their `validation_errors`. This replaces the old silent `event_time IS NOT NULL` drop.
+  - **Enrichment** — new seeded `category_reference` table (department, tax_rate) is read once at startup and broadcast-joined onto valid orders, adding `department`, `tax_rate`, `tax_amount`. `category_metrics` gained a `total_tax` column.
+  - **Anomaly branch** — `spark-streaming/anomaly.py` (`is_anomaly`) flags orders with revenue above `ANOMALY_REVENUE_THRESHOLD` (default 1500) into the new `order_anomalies` table.
+- Refactored `spark_job.py` so each stage is a standalone DataFrame function (`parse_and_validate`, `select_valid`, `select_invalid`, `enrich_orders`, `compute_category_metrics`, `compute_city_metrics`, `detect_anomalies`); `main()` only wires them to Kafka and the four JDBC sinks.
+- Added the first test suite (61 tests, pytest): producer generator, validation rules, anomaly rule, and local-mode PySpark tests for every stage. Run with `pytest` from the repo root.
+- Verified end to end against a real Postgres 16 with `schema.sql` applied: all four sinks write correctly, including the `TEXT[]` DLQ column.
+
+### Upgrade note
+Existing stacks need `docker compose down -v` so Postgres re-runs `schema.sql` and Spark drops checkpoints built for the old query plan.
+
+### Pending
+- CI workflow to run the tests on push
+- Grafana panels for `order_anomalies` and `orders_dlq`
+- Optional: Kubernetes manifests

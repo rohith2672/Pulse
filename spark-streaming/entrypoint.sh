@@ -6,6 +6,7 @@ EXTRA_JARS=$(ls /opt/spark-extra-jars/*.jar | paste -sd ',' -)
 
 exec spark-submit \
   --jars          "$EXTRA_JARS" \
+  --py-files      /opt/spark-app/validation.py,/opt/spark-app/anomaly.py \
   --master        "local[2]" \
   --conf          "spark.sql.shuffle.partitions=4" \
   --conf          "spark.streaming.stopGracefullyOnShutdown=true" \

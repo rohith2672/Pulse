@@ -26,7 +26,7 @@ RUN mkdir -p /opt/spark-extra-jars && \
     curl -fL "https://repo1.maven.org/maven2/org/postgresql/postgresql/42.7.3/postgresql-42.7.3.jar" \
          -o /opt/spark-extra-jars/postgresql.jar
 
-COPY spark_job.py   /opt/spark-app/spark_job.py
+COPY spark_job.py validation.py anomaly.py /opt/spark-app/
 COPY entrypoint.sh  /opt/spark-app/entrypoint.sh
 RUN chmod +x /opt/spark-app/entrypoint.sh
 

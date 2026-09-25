@@ -75,6 +75,7 @@ services:
       WATERMARK_DELAY: "10 minutes"
       WINDOW_DURATION: "1 minute"
       TRIGGER_INTERVAL: "30 seconds"
+      ANOMALY_REVENUE_THRESHOLD: "1500"
     volumes:
       - spark_checkpoints:/opt/spark-checkpoints
 
