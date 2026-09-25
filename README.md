@@ -12,7 +12,12 @@
 
 ## Overview
 
-Pulse simulates a high-throughput e-commerce order feed and processes it in real time. A Python producer continuously generates fake order events and publishes them to Kafka at ~5 events/sec. A PySpark Structured Streaming job consumes those events, applies event-time windowed aggregations with watermarking for late-data tolerance, and writes the results to PostgreSQL — producing per-category and per-city revenue metrics over 1-minute tumbling windows.
+Pulse simulates a high-throughput e-commerce order feed and processes it in real time. A Python producer continuously generates fake order events (via [Faker](https://faker.readthedocs.io/)) and publishes them to Kafka at ~5 events/sec. A PySpark Structured Streaming job runs them through a multi-stage pipeline:
+
+1. **Validate** — every event is checked for missing fields, non-positive price/quantity, and unparseable timestamps. Bad events are routed to a dead-letter table (`orders_dlq`) with the reasons they failed instead of being silently dropped.
+2. **Enrich** — valid orders are joined against a `category_reference` lookup table to add `department`, `tax_rate`, and a derived `tax_amount`.
+3. **Aggregate** — event-time windowed aggregations with watermarking produce per-category and per-city revenue metrics over 1-minute tumbling windows.
+4. **Detect anomalies** — in parallel, individual orders whose revenue exceeds `ANOMALY_REVENUE_THRESHOLD` are written to `order_anomalies`.
 
 **Tech stack:**
 - **Confluent Kafka 7.6.1** — event transport and buffering
@@ -25,45 +30,52 @@ Pulse simulates a high-throughput e-commerce order feed and processes it in real
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                        Docker Network                           │
-│                                                                 │
-│  ┌──────────┐   orders   ┌───────────────┐                     │
-│  │ Producer │──────────►│     Kafka      │                     │
-│  │ (Python) │  ~5 ev/s  │  orders topic  │                     │
-│  └──────────┘           └───────┬───────┘                     │
-│                                 │                               │
-│                                 ▼                               │
-│                        ┌────────────────┐                      │
-│                        │  Spark Job     │                      │
-│                        │  (PySpark 3.5) │                      │
-│                        │                │                      │
-│                        │  • JSON parse  │                      │
-│                        │  • revenue =   │                      │
-│                        │    price×qty   │                      │
-│                        │  • 10-min      │                      │
-│                        │    watermark   │                      │
-│                        │  • 1-min       │                      │
-│                        │    windows     │                      │
-│                        └───────┬────────┘                      │
-│                                │                                │
-│               ┌────────────────┴────────────────┐              │
-│               ▼                                  ▼              │
-│   ┌───────────────────────┐   ┌───────────────────────────┐    │
-│   │   category_metrics    │   │      city_metrics         │    │
-│   │  (per category/window)│   │   (per city/window)       │    │
-│   │                       │   │                           │    │
-│   │ • window_start/end    │   │ • window_start/end        │    │
-│   │ • total_revenue       │   │ • total_revenue           │    │
-│   │ • order_count         │   │ • order_count             │    │
-│   │ • avg_order_value     │   └───────────────────────────┘    │
-│   │ • total_quantity      │                                     │
-│   └───────────────────────┘           PostgreSQL 16            │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
+┌──────────┐  orders   ┌─────────┐
+│ Producer │─────────► │  Kafka  │
+│ (Faker)  │  ~5 ev/s  │ orders  │
+└──────────┘           └────┬────┘
+                            │
+┌───────────────────────────┼──────────── Spark Job (PySpark 3.5) ─────────────┐
+│                           ▼                                                  │
+│                ┌──────────────────────┐                                      │
+│                │ 1. Parse + validate  │── invalid ──────────────────────────────► orders_dlq
+│                └──────────┬───────────┘                                      │
+│                           │ valid (revenue = price × qty)                    │
+│                           ▼                                                  │
+│                ┌──────────────────────┐    ┌────────────────────┐            │
+│                │ 2. Enrich            │◄───│ category_reference │ (broadcast)│
+│                │  + department        │    └────────────────────┘            │
+│                │  + tax_amount        │                                      │
+│                └──────────┬───────────┘                                      │
+│              ┌────────────┴─────────────┐                                    │
+│              ▼                          ▼                                    │
+│  ┌───────────────────────┐   ┌──────────────────────┐                        │
+│  │ 3. Windowed aggregates│   │ 4. Anomaly detection │─────────────────────────► order_anomalies
+│  │  10-min watermark,    │   │  revenue > threshold │                        │
+│  │  1-min windows        │   └──────────────────────┘                        │
+│  └───────────┬───────────┘                                                   │
+└──────────────┼───────────────────────────────────────────────────────────────┘
+               ├──────────► category_metrics  (per category/window, incl. total_tax)
+               └──────────► city_metrics      (per city/window)
+
+                                              All tables live in PostgreSQL 16 → Grafana
 ```
 
-**Data flow:** Producer → Kafka (`orders` topic) → Spark Structured Streaming → PostgreSQL
+**Data flow:** Producer → Kafka (`orders` topic) → Spark (validate → enrich → aggregate / detect anomalies) → PostgreSQL → Grafana
+
+### Validation rules
+
+An event is sent to `orders_dlq` if any of these fail (all failing rules are recorded in `validation_errors`):
+
+| Reason | Condition |
+|---|---|
+| `malformed_json` | Payload is not valid JSON, or doesn't match the event schema |
+| `missing_<field>` | Any of `event_id`, `order_id`, `user_id`, `product_id`, `category`, `city`, `event_timestamp`, `price`, `quantity` is null or blank |
+| `invalid_price` | `price` is not a number or is `<= 0` |
+| `invalid_quantity` | `quantity` is not an integer or is `<= 0` |
+| `invalid_event_timestamp` | `event_timestamp` is not a parseable ISO-8601 timestamp |
+
+Orders whose category isn't in `category_reference` are kept (not rejected) with a null `department` and zero tax.
 
 ---
 
@@ -178,13 +190,37 @@ FROM city_metrics
 ORDER BY window_start DESC, total_revenue DESC
 LIMIT 10;
 
+-- Enrichment: tax collected per category
+SELECT category, total_revenue, total_tax
+FROM category_metrics
+ORDER BY window_start DESC, total_tax DESC
+LIMIT 10;
+
+-- Anomalies (written immediately, no watermark wait)
+SELECT order_id, category, department, city, revenue, event_time
+FROM order_anomalies
+ORDER BY flagged_at DESC
+LIMIT 10;
+
+-- Dead-letter queue
+SELECT validation_errors, raw_value, received_at
+FROM orders_dlq
+ORDER BY received_at DESC
+LIMIT 10;
+
 -- Count rows per table
 SELECT 'category_metrics' AS tbl, COUNT(*) FROM category_metrics
-UNION ALL
-SELECT 'city_metrics', COUNT(*) FROM city_metrics;
+UNION ALL SELECT 'city_metrics',    COUNT(*) FROM city_metrics
+UNION ALL SELECT 'order_anomalies', COUNT(*) FROM order_anomalies
+UNION ALL SELECT 'orders_dlq',      COUNT(*) FROM orders_dlq;
 ```
 
-Expected: all 7 categories present in `category_metrics`, multiple cities in `city_metrics`, each row representing a 1-minute window.
+Expected: all 7 categories present in `category_metrics`, multiple cities in `city_metrics`, each row representing a 1-minute window. `order_anomalies` fills up within ~30 seconds, since orders above 1500 revenue are fairly common with the generator's price and quantity ranges. `orders_dlq` stays empty with the stock producer, because every event it generates is valid. To exercise it, publish a bad event by hand:
+
+```bash
+echo '{"event_id":"x","price":-1}' | docker exec -i pulse-kafka \
+  kafka-console-producer --bootstrap-server localhost:9092 --topic orders
+```
 
 ---
 
@@ -215,6 +251,19 @@ All settings are controlled via environment variables (defaults match `docker-co
 | `WINDOW_DURATION` | `1 minute` | Tumbling window size |
 | `TRIGGER_INTERVAL` | `30 seconds` | Spark micro-batch interval |
 | `CHECKPOINT_DIR` | `/tmp/spark-checkpoints` | State recovery directory |
+| `ANOMALY_REVENUE_THRESHOLD` | `1500` | Orders with `price × quantity` above this are written to `order_anomalies` |
+
+---
+
+## Running Tests
+
+Tests cover the producer's event generator, the validation and anomaly rules, and the Spark transformation stages (parse/validate, enrichment join, windowed aggregation, anomaly filter). The Spark tests use local-mode PySpark with static DataFrames, so no Kafka or Postgres is needed — only Java 17+.
+
+```bash
+python -m venv .venv && source .venv/bin/activate
+pip install -r producer/requirements-dev.txt -r spark-streaming/requirements-dev.txt
+pytest
+```
 
 ---
 
@@ -240,6 +289,7 @@ This is by design. The watermark mechanism works as follows:
 
 | Problem | Cause | Fix |
 |---|---|---|
+| `column "total_tax" does not exist` or missing `orders_dlq` / `order_anomalies` / `category_reference` tables | Postgres volume was created with an older `schema.sql` (it only runs on first start), or Spark checkpoints hold the old query state | `docker compose down -v` then `docker compose up -d --build` |
 | `InconsistentClusterIdException` in Kafka logs | Stale `kafka_data` volume from a previous run | `docker compose down -v` then `docker compose up -d --build` |
 | Spark container keeps restarting | Spark started before Kafka finished creating the `orders` topic | Wait ~30s then `docker compose restart spark-job` |
 | No rows in PostgreSQL after 15 minutes | Spark may have crashed before producer started | Check `docker compose logs spark-job`; restart if needed |
@@ -253,16 +303,23 @@ This is by design. The watermark mechanism works as follows:
 
 ```
 Pulse/
-├── docker-compose.yml          # Orchestrates all 4 services
+├── docker-compose.yml          # Orchestrates all services
+├── pytest.ini                  # Test discovery for both packages
 ├── database/
-│   └── schema.sql              # Auto-applied on Postgres first start
+│   └── schema.sql              # Tables + category_reference seed data, auto-applied on first start
 ├── producer/
 │   ├── producer.py             # Kafka event generator (confluent-kafka + Faker)
-│   └── requirements.txt        # confluent-kafka, faker, python-dateutil
+│   ├── requirements.txt        # confluent-kafka, faker, python-dateutil
+│   ├── requirements-dev.txt    # + pytest
+│   └── tests/                  # Event generator tests
 ├── spark-streaming/
-│   ├── spark_job.py            # PySpark Structured Streaming job
+│   ├── spark_job.py            # Pipeline stages + streaming wiring
+│   ├── validation.py           # validate_order() rules
+│   ├── anomaly.py              # is_anomaly() rule
 │   ├── Dockerfile              # eclipse-temurin:17-jre + PySpark + connector JARs
-│   └── entrypoint.sh           # spark-submit wrapper (auto-discovers JARs)
+│   ├── entrypoint.sh           # spark-submit wrapper (auto-discovers JARs)
+│   ├── requirements-dev.txt    # pyspark, pytest
+│   └── tests/                  # Validation, anomaly, and Spark stage tests
 └── docs/
     └── progress.md             # Session-by-session build log
 ```
